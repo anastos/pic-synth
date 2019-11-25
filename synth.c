@@ -6,9 +6,10 @@
 #define DISABLE_ISR INTEnable(INT_T2, 0)
 #define ENABLE_ISR INTEnable(INT_T2, 1)
 
-#define SINES_PER_NOTE 3
+#define SINES_PER_NOTE 4
 #define SINE_TABLE_SIZE 1024
 #define ENV_TABLE_SIZE 1024
+#define REL_TABLE_SIZE 32
 
 struct Note {
     volatile char state;
@@ -19,6 +20,7 @@ struct Note {
 struct Note notes[13];
 _Accum sine_tables[SINES_PER_NOTE][SINE_TABLE_SIZE];
 _Accum env_table[ENV_TABLE_SIZE];
+_Accum rel_table[REL_TABLE_SIZE];
 
 void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
     mT2ClearIntFlag();
@@ -36,8 +38,8 @@ void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
                 note->idx[j] = idx + note->inc[j];
             }
             if (note->state == 2) {
-                out_i *= env_table[min(note->rel_idx++ >> 12, ENV_TABLE_SIZE - 1)];
-                if (note->rel_idx >> 12 == ENV_TABLE_SIZE)
+                out_i *= rel_table[min(note->rel_idx++ >> 8, REL_TABLE_SIZE - 1)];
+                if (note->rel_idx >> 8 == REL_TABLE_SIZE)
                     note->state = 0;
             }
             out += out_i * env_table[min(note->env_idx++ >> 12, ENV_TABLE_SIZE - 1)];
@@ -62,7 +64,7 @@ int main() {
     int i, j;
     for (i = 0; i < SINES_PER_NOTE; i++)
         for (j = 0; j < SINE_TABLE_SIZE; j++)
-            sine_tables[i][j] = 50 * ampl_ratios[i] * sin(j * 6.28319 / SINE_TABLE_SIZE);
+            sine_tables[i][j] = 25 * ampl_ratios[i] * sin(j * 6.28319 / SINE_TABLE_SIZE);
     
     for (i = 0; i < 13; i++)
         for (j = 0; j < SINES_PER_NOTE; j++)
@@ -70,6 +72,9 @@ int main() {
     
     for (i = 0; i < ENV_TABLE_SIZE; i++)
         env_table[i] = 0.1 + 2 * exp(-((_Accum) i) / 8);
+
+    for (i = 0; i < REL_TABLE_SIZE; i++)
+        rel_table[i] = exp(-((_Accum) i) / 8);
 
     mPORTASetPinsDigitalOut(BIT_0); // LED
     mPORTAClearBits(BIT_0);
@@ -107,24 +112,24 @@ int main() {
                 button_pressed = buttons[1] & (1 << (i - 8));
             switch (notes[i].state) {
                 case 0:
-                    if (button_pressed)
+                    if (button_pressed) {
                         notes[i].state = 1;
+                        notes[i].env_idx = 0;
+                        notes[i].rel_idx = 0;
+                    }
                     break;
                 case 1:
                     if (!button_pressed)
                         notes[i].state = 2;
                     break;
                 case 2:
-                    if (button_pressed)
+                    if (button_pressed) {
                         notes[i].state = 1;
+                        notes[i].env_idx = 0;
+                        notes[i].rel_idx = 0;
+                    }
                     break;
             }
-//            notes[i].state = button_pressed;
-            if (!notes[i].state) {
-                notes[i].env_idx = 0;
-                notes[i].rel_idx = 0;
-            }
-            
             notes[0].state == 2 ? mPORTASetBits(BIT_0) : mPORTAClearBits(BIT_0);
         }
     }
