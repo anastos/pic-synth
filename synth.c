@@ -6,6 +6,7 @@
 #define DISABLE_ISR INTEnable(INT_T2, 0)
 #define ENABLE_ISR INTEnable(INT_T2, 1)
 
+#define NUM_NOTES 17
 #define SINES_PER_NOTE 4
 #define SINE_TABLE_SIZE 1024
 #define ENV_TABLE_SIZE 1024
@@ -17,7 +18,7 @@ struct Note {
     int env_idx, rel_idx;
 };
 
-struct Note notes[13];
+struct Note notes[NUM_NOTES];
 _Accum sine_tables[SINES_PER_NOTE][SINE_TABLE_SIZE];
 _Accum env_table[ENV_TABLE_SIZE];
 _Accum rel_table[REL_TABLE_SIZE];
@@ -27,7 +28,7 @@ void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
     
     _Accum out = 0;
     int i;
-    for (i = 0; i < 13; i++) {
+    for (i = 0; i < NUM_NOTES; i++) {
         struct Note * note = &notes[i];
         if (note->state) {
             _Accum out_i = 0;
@@ -57,7 +58,8 @@ void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
 
 int main() {    
     _Accum base_freqs[] = {10, 10.595, 11.225, 11.892, 12.599, 13.348,
-            14.142, 14.983, 15.874, 16.818, 17.818, 18.877, 20};
+            14.142, 14.983, 15.874, 16.818, 17.818, 18.877, 20,
+            21.189, 22.449, 23.784, 25.198};
     _Accum freq_ratios[] = {1, 2, 3, 4, 5};
     _Accum ampl_ratios[] = {1, 3.433, 1.836, 0.7996, 0.9882};
     
@@ -66,7 +68,7 @@ int main() {
         for (j = 0; j < SINE_TABLE_SIZE; j++)
             sine_tables[i][j] = 25 * ampl_ratios[i] * sin(j * 6.28319 / SINE_TABLE_SIZE);
     
-    for (i = 0; i < 13; i++)
+    for (i = 0; i < NUM_NOTES; i++)
         for (j = 0; j < SINES_PER_NOTE; j++)
             notes[i].inc[j] = base_freqs[i] * freq_ratios[j];
     
@@ -94,22 +96,20 @@ int main() {
     
     INTEnableSystemMultiVectoredInt();
 
-    char buttons[8];
+    char buttons[3], buttons_prev[3];;
     while (1) {
-        char i;
-        for (i = 0; i < 2; i++) {
+        int i;
+        for (i = 0; i < 3; i++)
+            buttons_prev[i] = buttons[i];
+        for (i = 0; i < 3; i++) {
             DISABLE_ISR;
             setBits(GPIOZ, (1 << i));
             buttons[i] = readPE(GPIOY);
             clearBits(GPIOZ, (1 << i));
             ENABLE_ISR;
         }
-        for (i = 0; i < 13; i++) {
-            char button_pressed;
-            if (i < 8)
-                button_pressed = buttons[0] & (1 << i);
-            else
-                button_pressed = buttons[1] & (1 << (i - 8));
+        for (i = 0; i < NUM_NOTES; i++) {
+            char button_pressed = buttons[i >> 3] & (1 << (i % 8));
             switch (notes[i].state) {
                 case 0:
                     if (button_pressed) {
@@ -130,7 +130,20 @@ int main() {
                     }
                     break;
             }
-            notes[0].state == 2 ? mPORTASetBits(BIT_0) : mPORTAClearBits(BIT_0);
+        }
+        if ((buttons[2] & 64) && !(buttons_prev[2] & 64)) {
+            for (i = 0; i < NUM_NOTES; i++)
+                notes[i].state = 0;
+            for (i = 0; i < NUM_NOTES; i++)
+                for (j = 0; j < SINES_PER_NOTE; j++)
+                    notes[i].inc[j] <<= 1;
+        }
+        if ((buttons[2] & 128) && !(buttons_prev[2] & 128)) {
+            for (i = 0; i < NUM_NOTES; i++)
+                notes[i].state = 0;
+            for (i = 0; i < NUM_NOTES; i++)
+                for (j = 0; j < SINES_PER_NOTE; j++)
+                    notes[i].inc[j] >>= 1;
         }
     }
 }
