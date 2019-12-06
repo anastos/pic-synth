@@ -3,6 +3,15 @@
 #define SET_CS    {mPORTBSetBits(BIT_0);}
 #define CLEAR_CS  {mPORTBClearBits(BIT_0);}
 
+void configurePE() {
+    mPORTBSetPinsDigitalOut(BIT_0);
+    mPORTBSetBits(BIT_0);
+    initPE();
+    mPortYSetPinsIn(0xff);
+    mPortZSetPinsOut(0xff);
+    writePE(GPIOZ, 0);
+}
+
 void initPE() {
   writePE(IOCON, ( CLEAR_BANK   | CLEAR_MIRROR | SET_SEQOP |
                    CLEAR_DISSLW | CLEAR_HAEN   | CLEAR_ODR |

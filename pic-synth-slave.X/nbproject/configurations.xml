@@ -6,7 +6,6 @@
                    projectFiles="true">
       <itemPath>../config_1_3_2.h</itemPath>
       <itemPath>../pt_cornell_1_3_2.h</itemPath>
-      <itemPath>../port_expander_brl4.h</itemPath>
       <itemPath>../common.h</itemPath>
     </logicalFolder>
     <logicalFolder name="LinkerScript"
@@ -16,8 +15,7 @@
     <logicalFolder name="SourceFiles"
                    displayName="Source Files"
                    projectFiles="true">
-      <itemPath>../port_expander_brl4.c</itemPath>
-      <itemPath>../synth_master.c</itemPath>
+      <itemPath>../synth_slave.c</itemPath>
     </logicalFolder>
     <logicalFolder name="ExternalFiles"
                    displayName="Important Files"
@@ -27,10 +25,6 @@
   </logicalFolder>
   <sourceRootList>
     <Elem>..</Elem>
-    <Elem>../../Protothreads_1_2</Elem>
-    <Elem>../../Neural_model_pt_1_2</Elem>
-    <Elem>../../z_analysis_pt_1_2</Elem>
-    <Elem>../../Big_board_pt_1_2_expander</Elem>
   </sourceRootList>
   <projectmakefile>Makefile</projectmakefile>
   <confs>
@@ -79,7 +73,7 @@
         <property key="generate-micro-compressed-code" value="false"/>
         <property key="isolate-each-function" value="false"/>
         <property key="make-warnings-into-errors" value="false"/>
-        <property key="optimization-level" value="-O1"/>
+        <property key="optimization-level" value=""/>
         <property key="place-data-into-section" value="false"/>
         <property key="post-instruction-scheduling" value="default"/>
         <property key="pre-instruction-scheduling" value="default"/>
@@ -93,25 +87,6 @@
       <C32-AR>
         <property key="additional-options-chop-files" value="false"/>
       </C32-AR>
-      <C32-AS>
-        <property key="assembler-symbols" value=""/>
-        <property key="enable-symbols" value="true"/>
-        <property key="exclude-floating-point-library" value="false"/>
-        <property key="expand-macros" value="false"/>
-        <property key="extra-include-directories-for-assembler" value=""/>
-        <property key="extra-include-directories-for-preprocessor" value=""/>
-        <property key="false-conditionals" value="false"/>
-        <property key="keep-locals" value="false"/>
-        <property key="list-assembly" value="true"/>
-        <property key="list-source" value="true"/>
-        <property key="list-symbols" value="false"/>
-        <property key="oXC32asm-list-to-file" value="true"/>
-        <property key="omit-debug-dirs" value="false"/>
-        <property key="omit-forms" value="false"/>
-        <property key="preprocessor-macros" value=""/>
-        <property key="warning-level" value=""/>
-        <appendMe value="-a"/>
-      </C32-AS>
       <C32-LD>
         <property key="additional-options-use-response-files" value="false"/>
         <property key="enable-check-sections" value="false"/>
@@ -176,7 +151,6 @@
         <property key="relaxed-math" value="false"/>
         <property key="save-temps" value="false"/>
         <property key="wpo-lto" value="false"/>
-        <appendMe value="-O1"/>
       </C32Global>
       <PKOBSKDEPlatformTool>
         <property key="AutoSelectMemRanges" value="auto"/>

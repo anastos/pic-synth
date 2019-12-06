@@ -61,6 +61,8 @@
 #define OLATY    0x14
 #define OLATZ    0x15
 
+void configurePE();
+
 /* Initializes SPI channel 2 with 8-bit modeRB9 for CS: 
  * pins used:
  *  --  CS - RPB9 (Pin 18)
