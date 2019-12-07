@@ -9,6 +9,17 @@
 #define ENABLE_ISR INTEnable(INT_T2, 1)
 
 #define MAX_RECORDED_NOTES 256
+#define NUM_NOTES 17
+#define SINES_PER_NOTE 4
+#define SINE_TABLE_SIZE 1024
+#define ENV_TABLE_SIZE 512
+#define REL_TABLE_SIZE 32
+
+struct Note {
+    volatile char state;
+    _Accum inc[SINES_PER_NOTE], idx[SINES_PER_NOTE];
+    int env_idx, rel_idx;
+};
 
 void configureUART() {
     UARTConfigure(UART2, UART_ENABLE_PINS_TX_RX_ONLY);

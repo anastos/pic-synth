@@ -1,18 +1,6 @@
 #include "common.h"
 #include "port_expander_brl4.h"
 
-#define NUM_NOTES 17
-#define SINES_PER_NOTE 4
-#define SINE_TABLE_SIZE 1024
-#define ENV_TABLE_SIZE 512
-#define REL_TABLE_SIZE 32
-
-struct Note {
-    volatile char state;
-    _Accum inc[SINES_PER_NOTE], idx[SINES_PER_NOTE];
-    int env_idx, rel_idx;
-};
-
 struct Note notes[2 * NUM_NOTES];
 _Accum sine_tables[SINES_PER_NOTE][SINE_TABLE_SIZE];
 _Accum env_table[ENV_TABLE_SIZE];
@@ -179,7 +167,7 @@ int main() {
                     time.i = recorded_times[i];
                     for (j = 0; j < 4; j++) {
                         while(!UARTTransmitterIsReady(UART2));
-                        UARTSendDataByte(UART2, time.c[i]);
+                        UARTSendDataByte(UART2, time.c[j]);
                     }
                 }
                 clearBits(GPIOZ, BIT_7);
