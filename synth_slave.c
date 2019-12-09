@@ -63,7 +63,7 @@ void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
 int main() {
     _Accum base_freqs[] = {1, 1.0595, 1.1225, 1.1892, 1.2599, 1.3348,
             1.4142, 1.4983, 1.5874, 1.6818, 1.7818, 1.8877, 2,
-            2.1189, 2.2449, 2.3784, 2.5198};
+            2.1189, 2.2449, 2.3784, 2.5198, 2.6697};
     _Accum freq_ratios[] = {1, 2, 3, 4, 5};
     _Accum ampl_ratios[] = {1, 3.433, 1.836, 0.7996, 0.9882};
                         // {1, 0.5839, 0.2303, 0.1026, 0.04308};
@@ -90,24 +90,44 @@ int main() {
     configureUART();
     configureDAC();
 
+    mPORTBSetPinsDigitalIn(BIT_0);
+    EnablePullDownB(BIT_0);
+
+    mPORTBSetPinsDigitalOut(BIT_15);
+    mPORTBClearBits(BIT_15);
+
     for (;;) {
-        while(!UARTReceivedDataIsAvailable(UART2));
+        char prev_button;
+        while (!UARTReceivedDataIsAvailable(UART2)) {
+            char button = mPORTBReadBits(BIT_0);
+            if (button && !prev_button) {
+                playback = !playback;
+                if (playback) {
+                    playback_time = 0;
+                    playback_idx = 0;
+                } else {
+                    for (i = 0; i < NUM_NOTES; i++) {
+                        notes[i + NUM_NOTES].state = 0;
+                        note_on[i] = 0;
+                    }
+                }
+            }
+            prev_button = button;
+            playback ? mPORTBSetBits(BIT_15) : mPORTBClearBits(BIT_15);
+        }
+
         recorded_count = UARTGetDataByte(UART2);
 
         int i, j;
         for (i = 0; i < recorded_count; i++) {
-            while(!UARTReceivedDataIsAvailable(UART2));
+            while (!UARTReceivedDataIsAvailable(UART2));
             recorded_notes[i] = UARTGetDataByte(UART2);
             union {int i; char c[4]; } time;
             for (j = 0; j < 4; j++) {
-                while(!UARTReceivedDataIsAvailable(UART2));
+                while (!UARTReceivedDataIsAvailable(UART2));
                 time.c[j] = UARTGetDataByte(UART2);
             }
             recorded_times[i] = time.i;
         }
-
-        playback = 1;
-
-        for (;;);
     }
 }

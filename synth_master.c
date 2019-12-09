@@ -13,7 +13,7 @@ unsigned char playback, playback_idx, recorded_count;
 
 void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
     mT2ClearIntFlag();
-    
+
     _Accum out = 0;
     int i;
     for (i = 0; i < 2 * NUM_NOTES; i++) {
@@ -55,7 +55,7 @@ void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
 int main() {    
     _Accum base_freqs[] = {1, 1.0595, 1.1225, 1.1892, 1.2599, 1.3348,
             1.4142, 1.4983, 1.5874, 1.6818, 1.7818, 1.8877, 2,
-            2.1189, 2.2449, 2.3784, 2.5198};
+            2.1189, 2.2449, 2.3784, 2.5198, 2.6697};
     _Accum freq_ratios[] = {1, 2, 3, 4, 5};
     _Accum ampl_ratios[] = {1, 3.433, 1.836, 0.7996, 0.9882};
                         // {1, 0.5839, 0.2303, 0.1026, 0.04308};
@@ -64,13 +64,13 @@ int main() {
     for (i = 0; i < SINES_PER_NOTE; i++)
         for (j = 0; j < SINE_TABLE_SIZE; j++)
             sine_tables[i][j] = 25 * ampl_ratios[i] * sin(j * 6.28319 / SINE_TABLE_SIZE);
-    
+
     for (i = 0; i < NUM_NOTES; i++)
         for (j = 0; j < SINES_PER_NOTE; j++) {
             notes[i].inc[j] = 15.3897 * base_freqs[i] * freq_ratios[j];
             notes[i + NUM_NOTES].inc[j] = notes[i].inc[j];
         }
-    
+
     for (i = 0; i < ENV_TABLE_SIZE; i++)
         env_table[i] = 0.1 + 2 * exp(-((_Accum) i) / 128);
 
@@ -83,11 +83,14 @@ int main() {
     configurePE();
     configureUART();
 
-    char buttons[3], buttons_prev[3], recording;
+    mPORTBSetPinsDigitalOut(BIT_13 | BIT_15);
+    mPORTBClearBits(BIT_13 | BIT_15);
+
+    char buttons[4], buttons_prev[4], recording, pending_recording;
 
     while (1) {
         int i, j;
-        for (i = 0; i < 3; i++) {
+        for (i = 0; i < 4; i++) {
             buttons_prev[i] = buttons[i];
             DISABLE_ISR;
             setBits(GPIOZ, (1 << i));
@@ -136,57 +139,61 @@ int main() {
                     break;
             }
         }
-        if ((buttons[2] & 64) && !(buttons_prev[2] & 64)) {
+        if ((buttons[2] & 32) && !(buttons_prev[2] & 32)) {
             for (i = 0; i < NUM_NOTES; i++)
                 notes[i].state = 0;
             for (i = 0; i < NUM_NOTES; i++)
                 for (j = 0; j < SINES_PER_NOTE; j++)
                     notes[i].inc[j] <<= 1;
         }
-        if ((buttons[2] & 128) && !(buttons_prev[2] & 128)) {
+        if ((buttons[2] & 64) && !(buttons_prev[2] & 64)) {
             for (i = 0; i < NUM_NOTES; i++)
                 notes[i].state = 0;
             for (i = 0; i < NUM_NOTES; i++)
                 for (j = 0; j < SINES_PER_NOTE; j++)
                     notes[i].inc[j] >>= 1;
         }
-        if ((buttons[2] & 32) && !(buttons_prev[2] & 32)) {
+        if ((buttons[2] & 128) && !(buttons_prev[2] & 128)) {
             DISABLE_ISR;
             recording = !recording;
             if (recording) {
                 recording_time = 0;
                 recorded_count = 0;
-                setBits(GPIOZ, BIT_7);
+                mPORTBSetBits(BIT_15);
             } else {
-                while(!UARTTransmitterIsReady(UART2));
-                UARTSendDataByte(UART2, recorded_count);
-                for (i = 0; i < recorded_count; i++) {
-                    while(!UARTTransmitterIsReady(UART2));
-                    UARTSendDataByte(UART2, recorded_notes[i]);
-                    union {int i; char c[4]; } time;
-                    time.i = recorded_times[i];
-                    for (j = 0; j < 4; j++) {
-                        while(!UARTTransmitterIsReady(UART2));
-                        UARTSendDataByte(UART2, time.c[j]);
-                    }
-                }
-                clearBits(GPIOZ, BIT_7);
+                mPORTBClearBits(BIT_15);
+                pending_recording = 1;
+                mPORTBSetBits(BIT_13);
             }
             ENABLE_ISR;
         }
-        if ((buttons[2] & 16) && !(buttons_prev[2] & 16)) {
-            playback = !playback;
-            if (playback) {
-                playback_time = 0;
-                playback_idx = 0;
-            } else {
-                for (i = 0; i < NUM_NOTES; i++) {
-                    notes[i + NUM_NOTES].state = 0;
-                    note_on[i] = 0;
+        if ((buttons[3] & 1) && !(buttons_prev[3] & 1) && pending_recording) {
+            while(!UARTTransmitterIsReady(UART2));
+            UARTSendDataByte(UART2, recorded_count);
+            for (i = 0; i < recorded_count; i++) {
+                while(!UARTTransmitterIsReady(UART2));
+                UARTSendDataByte(UART2, recorded_notes[i]);
+                union {int i; char c[4]; } time;
+                time.i = recorded_times[i];
+                for (j = 0; j < 4; j++) {
+                    while(!UARTTransmitterIsReady(UART2));
+                    UARTSendDataByte(UART2, time.c[j]);
                 }
             }
+            pending_recording = 0;
+            mPORTBClearBits(BIT_13);
         }
-
-        playback ? mPORTASetBits(BIT_0) : mPORTAClearBits(BIT_0);
+//        if ((buttons[2] & 16) && !(buttons_prev[2] & 16)) {
+//            playback = !playback;
+//            if (playback) {
+//                playback_time = 0;
+//                playback_idx = 0;
+//            } else {
+//                for (i = 0; i < NUM_NOTES; i++) {
+//                    notes[i + NUM_NOTES].state = 0;
+//                    note_on[i] = 0;
+//                }
+//            }
+//        }
     }
 }

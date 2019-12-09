@@ -4,12 +4,14 @@
 #include "config_1_3_2.h"
 #include "math.h"
 
+#define EnablePullDownB(bits) CNPUBCLR=bits; CNPDBSET=bits
+
 #define DAC_CONFIG_CHAN_A 0b0011000000000000
 #define DISABLE_ISR INTEnable(INT_T2, 0)
 #define ENABLE_ISR INTEnable(INT_T2, 1)
 
 #define MAX_RECORDED_NOTES 256
-#define NUM_NOTES 17
+#define NUM_NOTES 18
 #define SINES_PER_NOTE 4
 #define SINE_TABLE_SIZE 1024
 #define ENV_TABLE_SIZE 512
@@ -35,7 +37,7 @@ void configureDAC() {
     // DAC chip select
     mPORTBSetPinsDigitalOut(BIT_1);
     mPORTBSetBits(BIT_1);
-    
+
     // audio sample timer
     OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_256, 8);
     ConfigIntTimer2(T2_INT_ON | T2_INT_PRIOR_2);
