@@ -17,6 +17,8 @@
 #define ENV_TABLE_SIZE 512
 #define REL_TABLE_SIZE 32
 
+typedef union { int i; char c[4]; } char_int;
+
 struct Note {
     volatile char state;
     _Accum inc[SINES_PER_NOTE], idx[SINES_PER_NOTE];

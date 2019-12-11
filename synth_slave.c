@@ -5,7 +5,7 @@ _Accum sine_tables[SINES_PER_NOTE][SINE_TABLE_SIZE];
 _Accum env_table[ENV_TABLE_SIZE];
 _Accum rel_table[REL_TABLE_SIZE];
 volatile int playback_time;
-volatile char note_on[NUM_NOTES];
+char note_on[NUM_NOTES];
 char recorded_notes[MAX_RECORDED_NOTES];
 int recorded_times[MAX_RECORDED_NOTES];
 unsigned char playback, playback_idx, recorded_count;
@@ -16,26 +16,12 @@ void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
     if (!playback)
         return;
 
-    if (playback_time == recorded_times[playback_idx]) {
-        struct Note * note = &notes[recorded_notes[playback_idx]];
-        if (note->state == 1) {
-            note->state = 2;
-        } else {
-            note->state = 1;
-            note->env_idx = 0;
-            note->rel_idx = 0;
-        }
-        if (++playback_idx == recorded_count)
-            playback = 0;
-    }
-
     _Accum out = 0;
-    int i;
+    int i, j;
     for (i = 0; i < NUM_NOTES; i++) {
         struct Note * note = &notes[i];
         if (note->state) {
             _Accum out_i = 0;
-            int j;
             for (j = 0; j < SINES_PER_NOTE; j++) {
                 _Accum idx = note->idx[j];
                 out_i += sine_tables[j][(unsigned int) idx % SINE_TABLE_SIZE];
@@ -51,6 +37,15 @@ void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
     }
 
     playback_time++;
+    while (playback_time == recorded_times[playback_idx]) {
+        note_on[recorded_notes[playback_idx]] = !note_on[recorded_notes[playback_idx]];
+        if (++playback_idx == recorded_count) {
+            playback = 0;
+            mPORTBClearBits(BIT_15);
+            DISABLE_ISR;
+            break;
+        }
+    }
 
     while (TxBufFullSPI1());
     mPORTBClearBits(BIT_1);
@@ -105,24 +100,37 @@ int main() {
                 if (playback) {
                     playback_time = 0;
                     playback_idx = 0;
+                    ENABLE_ISR;
+                    mPORTBSetBits(BIT_15);
                 } else {
                     for (i = 0; i < NUM_NOTES; i++) {
                         notes[i + NUM_NOTES].state = 0;
                         note_on[i] = 0;
                     }
+                    mPORTBClearBits(BIT_15);
+                    DISABLE_ISR;
                 }
             }
             prev_button = button;
-            playback ? mPORTBSetBits(BIT_15) : mPORTBClearBits(BIT_15);
+            for (i = 0; i < NUM_NOTES; i++) {
+                if (notes[i].state == 1) {
+                    if (note_on[i]) {
+                        notes[i].state = 1;
+                        notes[i].env_idx = 0;
+                        notes[i].rel_idx = 0;
+                    }
+                } else if (!note_in[i]) {
+                    notes[i].state = 2;
+                }
+            }
         }
 
         recorded_count = UARTGetDataByte(UART2);
 
-        int i, j;
         for (i = 0; i < recorded_count; i++) {
             while (!UARTReceivedDataIsAvailable(UART2));
             recorded_notes[i] = UARTGetDataByte(UART2);
-            union {int i; char c[4]; } time;
+            char_int time;
             for (j = 0; j < 4; j++) {
                 while (!UARTReceivedDataIsAvailable(UART2));
                 time.c[j] = UARTGetDataByte(UART2);
