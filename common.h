@@ -6,6 +6,8 @@
 
 #define EnablePullDownB(bits) CNPUBCLR=bits; CNPDBSET=bits
 
+#define PRESSED(b) ((btn_st.i & b) && !(btn_st_prev.i & b))
+
 #define DAC_CONFIG_CHAN_A 0b0011000000000000
 #define DISABLE_ISR INTEnable(INT_T2, 0)
 #define ENABLE_ISR INTEnable(INT_T2, 1)
