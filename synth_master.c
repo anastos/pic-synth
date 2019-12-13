@@ -1,11 +1,30 @@
 #include "common.h"
 #include "port_expander_brl4.h"
 
+#define SEND_BYTE(b) { \
+    while(!UARTTransmitterIsReady(UART2)); \
+    UARTSendDataByte(UART2, b); \
+}
+
+#define SEND_INT(d) { \
+    char_int ci; \
+    ci.i = d; \
+    int idx; \
+    for (idx = 0; idx < 4; idx++) \
+        SEND_BYTE(ci.c[idx]) \
+}
+
 struct Note notes[NUM_NOTES];
 _Accum sine_tables[SINES_PER_NOTE][SINE_TABLE_SIZE];
-_Accum env_table[ENV_TABLE_SIZE];
+_Accum env_table[3][ENV_TABLE_SIZE];
 _Accum rel_table[REL_TABLE_SIZE];
 volatile int recording_time;
+char sound;
+
+unsigned char recording, octave = 3, initial_octave, initial_sound, recorded_count;
+char recorded_notes[MAX_RECORDED_NOTES];
+int recorded_times[MAX_RECORDED_NOTES];
+int recorded_length;
 
 void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
     mT2ClearIntFlag();
@@ -26,7 +45,7 @@ void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
                 if (note->rel_idx >> 8 == REL_TABLE_SIZE)
                     note->state = 0;
             }
-            out += out_i * env_table[min(note->env_idx++ >> 8, ENV_TABLE_SIZE - 1)];
+            out += out_i * env_table[sound][min(note->env_idx++ >> 8, ENV_TABLE_SIZE - 1)];
         }
     }
 
@@ -41,46 +60,53 @@ void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
     mPORTBSetBits(BIT_1);
 }
 
-int main() {
-    _Accum base_freqs[] = {1, 1.0595, 1.1225, 1.1892, 1.2599, 1.3348,
-            1.4142, 1.4983, 1.5874, 1.6818, 1.7818, 1.8877, 2,
-            2.1189, 2.2449, 2.3784, 2.5198, 2.6697};
-    _Accum freq_ratios[] =
-//            {1, 2, 3, 4, 5}; // piano
-//            {1, 1.5, 3, 6}; // organ
-            {1, 2, 3, 4, 6}; // guitar
-    _Accum ampl_ratios[] =
-//            {1, 3.433, 1.836, 0.7996, 0.9882}; // piano
-//            {1, 0.6608, 0.7184, 1.103}; //organ
-            {1, 0.7189, 0.2666, 0.09237, 0.06642}; // guitar
-
-    char_int btn_st, btn_samp;
-    unsigned char recording, octave = 3, initial_octave, recorded_count;
-    char recorded_notes[MAX_RECORDED_NOTES];
-    int recorded_times[MAX_RECORDED_NOTES];
-    int recorded_length;
-
+void setSound(char new_sound) {
+    mPORTASetBits(BIT_0);
     int i, j;
+    for (i = 0; i < NUM_NOTES; i++)
+        notes[i].state = 0;
+    sound = new_sound;
     for (i = 0; i < SINES_PER_NOTE; i++)
         for (j = 0; j < SINE_TABLE_SIZE; j++)
-            sine_tables[i][j] = 50 * ampl_ratios[i] * sin(j * 6.28319 / SINE_TABLE_SIZE);
-
+            sine_tables[i][j] = 50 * ampl_ratios[sound][i] * sin(j * 6.28319 / SINE_TABLE_SIZE);
     for (i = 0; i < NUM_NOTES; i++)
-        for (j = 0; j < SINES_PER_NOTE; j++) {
-            notes[i].inc[j] = 15.3897 * base_freqs[i] * freq_ratios[j];
-            notes[i + NUM_NOTES].inc[j] = notes[i].inc[j];
-        }
+        for (j = 0; j < SINES_PER_NOTE; j++)
+            notes[i].inc[j] = (_Accum) (0.96186 * base_freqs[i] * freq_ratios[sound][j]) << octave;
+    mPORTAClearBits(BIT_0);
+}
 
+void sendRecording(char slave) {
+    mPORTASetBits(BIT_0);
+    SEND_BYTE(slave);
+    int i;
+    for (i = 100000; i--;);
+    SEND_BYTE(recorded_count);
+    SEND_BYTE(initial_octave);
+    SEND_BYTE(initial_sound);
+    SEND_INT(recorded_length);
+    for (i = 0; i < recorded_count; i++) {
+        SEND_BYTE(recorded_notes[i]);
+        SEND_INT(recorded_times[i]);
+    }
+    mPORTAClearBits(BIT_0);
+    mPORTBClearBits(BIT_13);
+}
+
+int main() {
+    char_int btn_st, btn_samp;
+
+    int i;
     for (i = 0; i < ENV_TABLE_SIZE; i++) {
         _Accum a = i;
-        env_table[i] =
-//                0.1 + 2 * exp(-a >> 7); // piano
-//                (1 - exp(-a >> 5)) * exp(-a >> 10); // organ
-                (1 - exp(-a >> 5)) * (0.1 + 8 * exp(-a >> 5)); // guitar
+        env_table[0][i] = 0.05 + exp(-a >> 7); // piano
+        env_table[1][i] = (1 - exp(-a >> 5)) * exp(-a >> 10); // organ
+        env_table[2][i] = 4 * exp(-a >> 4); // guitar
     }
 
     for (i = 0; i < REL_TABLE_SIZE; i++)
         rel_table[i] = exp(-((_Accum) i) / 8);
+
+    setSound(0);
 
     configureLED();
     configureSPI();
@@ -123,6 +149,27 @@ int main() {
                 }
             }
         }
+        if (PRESSED(BIT_18)) {
+            setSound(0);
+            if (recording) {
+                recorded_notes[recorded_count] = BIT_6 | sound;
+                recorded_times[recorded_count++] = recording_time;
+            }
+        }
+        if (PRESSED(BIT_19)) {
+            setSound(1);
+            if (recording) {
+                recorded_notes[recorded_count] = BIT_6 | sound;
+                recorded_times[recorded_count++] = recording_time;
+            }
+        }
+        if (PRESSED(BIT_20)) {
+            setSound(2);
+            if (recording) {
+                recorded_notes[recorded_count] = BIT_6 | sound;
+                recorded_times[recorded_count++] = recording_time;
+            }
+        }
         if (PRESSED(BIT_21) && octave < 5) {
             for (i = 0; i < NUM_NOTES; i++)
                 notes[i].state = 0;
@@ -154,6 +201,7 @@ int main() {
                 recording_time = 0;
                 recorded_count = 0;
                 initial_octave = octave;
+                initial_sound = sound;
                 mPORTBClearBits(BIT_13);
                 mPORTBSetBits(BIT_15);
             } else {
@@ -163,28 +211,9 @@ int main() {
             }
             ENABLE_ISR;
         }
-        if (PRESSED(BIT_24)) {
-            while(!UARTTransmitterIsReady(UART2));
-            UARTSendDataByte(UART2, initial_octave);
-            for (i = 100000; i--;);
-            char_int time;
-            time.i = recorded_length;
-            for (i = 0; i < 4; i++) {
-                while(!UARTTransmitterIsReady(UART2));
-                UARTSendDataByte(UART2, time.c[i]);
-            }
-            while(!UARTTransmitterIsReady(UART2));
-            UARTSendDataByte(UART2, recorded_count);
-            for (i = 0; i < recorded_count; i++) {
-                while(!UARTTransmitterIsReady(UART2));
-                UARTSendDataByte(UART2, recorded_notes[i]);
-                time.i = recorded_times[i];
-                for (j = 0; j < 4; j++) {
-                    while(!UARTTransmitterIsReady(UART2));
-                    UARTSendDataByte(UART2, time.c[j]);
-                }
-            }
-            mPORTBClearBits(BIT_13);
-        }
+        if (PRESSED(BIT_24))
+            sendRecording(0);
+        if (PRESSED(BIT_25))
+            sendRecording(1);
     }
 }

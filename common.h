@@ -15,7 +15,7 @@
 #define MAX_RECORDED_NOTES 256
 #define NUM_NOTES 18
 #define SINES_PER_NOTE 4
-#define SINE_TABLE_SIZE 1024
+#define SINE_TABLE_SIZE 512
 #define ENV_TABLE_SIZE 512
 #define REL_TABLE_SIZE 32
 
@@ -25,6 +25,20 @@ struct Note {
     volatile char state;
     _Accum inc[SINES_PER_NOTE], idx[SINES_PER_NOTE];
     int env_idx, rel_idx;
+};
+
+const _Accum base_freqs[] = {1, 1.0595, 1.1225, 1.1892, 1.2599, 1.3348,
+        1.4142, 1.4983, 1.5874, 1.6818, 1.7818, 1.8877, 2,
+        2.1189, 2.2449, 2.3784, 2.5198, 2.6697};
+const _Accum freq_ratios[3][SINES_PER_NOTE] = {
+    {1, 2, 3, 4}, // piano
+    {1, 1.5, 3, 6}, // organ
+    {1, 2, 3, 4} // guitar
+};
+const _Accum ampl_ratios[3][SINES_PER_NOTE] = {
+    {1, 3.433, 1.836, 0.7996}, // piano
+    {1, 0.6608, 0.7184, 1.103}, //organ
+    {1, 0.4563, 0.1282, 0.08147} // guitar
 };
 
 void configureUART() {

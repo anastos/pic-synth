@@ -1,18 +1,48 @@
 #include "common.h"
 #include "pt_cornell_1_3_2.h"
 
+#define SLAVE_ID 1
+
+#define RECV_BYTE(d) { \
+    while (!UARTReceivedDataIsAvailable(UART2)); \
+    d = UARTGetDataByte(UART2); \
+}
+
+#define RECV_INT(d) { \
+    char_int ci; \
+    int idx; \
+    for (idx = 0; idx < 4; idx++) \
+        RECV_BYTE(ci.c[idx]); \
+    d = ci.i; \
+}
+
 struct Note notes[NUM_NOTES];
 _Accum sine_tables[SINES_PER_NOTE][SINE_TABLE_SIZE];
-_Accum env_table[ENV_TABLE_SIZE];
+_Accum env_table[3][ENV_TABLE_SIZE];
 _Accum rel_table[REL_TABLE_SIZE];
 volatile int playback_time;
 char note_on[NUM_NOTES];
 char recorded_notes[MAX_RECORDED_NOTES];
 int recorded_times[MAX_RECORDED_NOTES];
 int recorded_length;
-unsigned char playback, loop, playback_idx, recorded_count, octave = 3, initial_octave;
+unsigned char playback, loop, playback_idx, recorded_count, octave = 3, initial_octave, sound, initial_sound;
 
 struct pt pt_uart, pt_btn;
+
+void setSound(char new_sound) {
+    mPORTASetBits(BIT_0);
+    int i, j;
+    for (i = 0; i < NUM_NOTES; i++)
+        notes[i].state = 0;
+    sound = new_sound;
+    for (i = 0; i < SINES_PER_NOTE; i++)
+        for (j = 0; j < SINE_TABLE_SIZE; j++)
+            sine_tables[i][j] = 50 * ampl_ratios[sound][i] * sin(j * 6.28319 / SINE_TABLE_SIZE);
+    for (i = 0; i < NUM_NOTES; i++)
+        for (j = 0; j < SINES_PER_NOTE; j++)
+            notes[i].inc[j] = (_Accum) (0.96186 * base_freqs[i] * freq_ratios[sound][j]) << octave;
+    mPORTAClearBits(BIT_0);
+}
 
 void initialize_playback() {
     playback = 1;
@@ -23,6 +53,7 @@ void initialize_playback() {
         notes[i].state = 0;
         note_on[i] = 0;
     }
+    setSound(initial_sound);
     if (initial_octave < octave) {
         for (i = 0; i < NUM_NOTES; i++)
             for (j = 0; j < SINES_PER_NOTE; j++)
@@ -59,7 +90,7 @@ void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
                 if (note->rel_idx >> 8 == REL_TABLE_SIZE)
                     note->state = 0;
             }
-            out += out_i * env_table[min(note->env_idx++ >> 8, ENV_TABLE_SIZE - 1)];
+            out += out_i * env_table[sound][min(note->env_idx++ >> 8, ENV_TABLE_SIZE - 1)];
         }
     }
 
@@ -80,6 +111,8 @@ void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
                         notes[i].inc[j] >>= 1;
                 octave--;
             }
+        } else if (n & BIT_6) {
+            setSound(n & (BIT_1 | BIT_0));
         } else {
             note_on[n] = !note_on[n];
         }
@@ -107,7 +140,7 @@ static PT_THREAD (btn_thread(struct pt *pt)) {
     static char_int btn_st, btn_samp;
     for (;;) {
         PT_YIELD_TIME_msec(30);
-        int i, j;
+        int i;
         char_int btn_samp_prev = btn_samp;
         btn_samp.i = mPORTBReadBits(BIT_0 | BIT_2);
         char_int btn_st_prev = btn_st;
@@ -147,59 +180,42 @@ static PT_THREAD (uart_thread(struct pt *pt)) {
     for (;;) {
         int i, j;
         char_int time;
-        while (!UARTReceivedDataIsAvailable(UART2)) {
+        char slave, count;
+        while (!UARTReceivedDataIsAvailable(UART2))
             PT_YIELD_TIME_msec(5);
-        }
-        mPORTASetBits(BIT_0);
-        initial_octave = UARTGetDataByte(UART2);
-        for (j = 0; j < 4; j++) {
-            while (!UARTReceivedDataIsAvailable(UART2));
-            time.c[j] = UARTGetDataByte(UART2);
-        }
-        recorded_length = time.i;
-        while (!UARTReceivedDataIsAvailable(UART2));
-        recorded_count = UARTGetDataByte(UART2);
-
-        for (i = 0; i < recorded_count; i++) {
-            while (!UARTReceivedDataIsAvailable(UART2));
-            recorded_notes[i] = UARTGetDataByte(UART2);
-            for (j = 0; j < 4; j++) {
-                while (!UARTReceivedDataIsAvailable(UART2));
-                time.c[j] = UARTGetDataByte(UART2);
+        RECV_BYTE(slave);
+        RECV_BYTE(count);
+        if (slave == SLAVE_ID) {
+            mPORTASetBits(BIT_0);
+            recorded_count = count;
+            RECV_BYTE(initial_octave);
+            RECV_BYTE(initial_sound);
+            RECV_INT(recorded_length);
+            for (i = 0; i < recorded_count; i++) {
+                RECV_BYTE(recorded_notes[i]);
+                RECV_INT(recorded_times[i])
             }
-            recorded_times[i] = time.i;
+            recorded_times[recorded_count] = 0;
+            mPORTAClearBits(BIT_0);
+        } else {
+            for (i = 0; i < 5 * count + 6; i++)
+                RECV_BYTE(j);
         }
-        recorded_times[recorded_count] = 0;
-        mPORTAClearBits(BIT_0);
     }
     PT_END(pt);
 }
 
 int main() {
-    _Accum base_freqs[] = {1, 1.0595, 1.1225, 1.1892, 1.2599, 1.3348,
-            1.4142, 1.4983, 1.5874, 1.6818, 1.7818, 1.8877, 2,
-            2.1189, 2.2449, 2.3784, 2.5198, 2.6697};
-    _Accum freq_ratios[] = {1, 2, 3, 4, 5};
-    _Accum ampl_ratios[] = {1, 3.433, 1.836, 0.7996, 0.9882};
-                        // {1, 0.5839, 0.2303, 0.1026, 0.04308};
-
-    int i, j;
-    for (i = 0; i < SINES_PER_NOTE; i++)
-        for (j = 0; j < SINE_TABLE_SIZE; j++)
-            sine_tables[i][j] = 25 * ampl_ratios[i] * sin(j * 6.28319 / SINE_TABLE_SIZE);
-
-    for (i = 0; i < NUM_NOTES; i++)
-        for (j = 0; j < SINES_PER_NOTE; j++) {
-            notes[i].inc[j] = 15.3897 * base_freqs[i] * freq_ratios[j];
-            notes[i + NUM_NOTES].inc[j] = notes[i].inc[j];
-        }
-
-    for (i = 0; i < ENV_TABLE_SIZE; i++)
-        env_table[i] = 0.1 + 2 * exp(-((_Accum) i) / 128);
+    int i;
+    for (i = 0; i < ENV_TABLE_SIZE; i++) {
+        _Accum a = i;
+        env_table[0][i] = 0.05 + exp(-a >> 7); // piano
+        env_table[1][i] = (1 - exp(-a >> 5)) * exp(-a >> 10); // organ
+        env_table[2][i] = 4 * exp(-a >> 4); // guitar
+    }
 
     for (i = 0; i < REL_TABLE_SIZE; i++)
         rel_table[i] = exp(-((_Accum) i) / 8);
-
 
     PT_setup();
     configureLED();
