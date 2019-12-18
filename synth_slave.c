@@ -21,14 +21,24 @@ _Accum sine_tables[SINES_PER_NOTE][SINE_TABLE_SIZE];
 _Accum env_table[3][ENV_TABLE_SIZE];
 _Accum rel_table[REL_TABLE_SIZE];
 volatile int playback_time;
-char note_on[NUM_NOTES];
-char recorded_notes[MAX_RECORDED_NOTES];
-int recorded_times[MAX_RECORDED_NOTES];
-int recorded_length;
-unsigned char playback, loop, playback_idx, recorded_count, octave = 3, initial_octave, sound, initial_sound;
+unsigned char
+    note_on[NUM_NOTES], // analogous to whether button is down or not
+    recorded_notes[MAX_RECORDED_NOTES], // commands recieved
+    playback, // whether the slave is playing a song
+    loop, // whether the slave should repeat the song
+    playback_idx, // next index of command to playback in recorded_notes
+    recorded_count, // number of valid commands in recorded_notes
+    octave = 3, // 0 <= octave <= 5, octave of notes begin played
+    initial_octave, // octave to start playback in
+    sound, // 0: piano, 1: organ, 2: plucked string
+    initial_sound; // sound to start playback in
 
-struct pt pt_uart, pt_btn;
+int recorded_times[MAX_RECORDED_NOTES], // times at which commands should run
+    recorded_length; // time at which playback should end/start over
 
+struct pt pt_uart, pt_btn; // threads for UART comm and checking buttons
+
+// sets lookup tables, etc. to a specific sound
 void setSound(char new_sound) {
     mPORTASetBits(BIT_0);
     int i, j;
@@ -44,6 +54,7 @@ void setSound(char new_sound) {
     mPORTAClearBits(BIT_0);
 }
 
+// start playback from the beginning
 void initialize_playback() {
     playback = 1;
     playback_time = 0;
@@ -68,6 +79,7 @@ void initialize_playback() {
     mPORTBSetBits(BIT_15);
 }
 
+// runs every 2048 cycles to compute DAC output
 void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
     mT2ClearIntFlag();
 
@@ -78,46 +90,48 @@ void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
     int i, j;
     for (i = 0; i < NUM_NOTES; i++) {
         struct Note * note = &notes[i];
-        if (note->state) {
+        if (note->state) { // pressed or recently released
             _Accum out_i = 0;
-            for (j = 0; j < SINES_PER_NOTE; j++) {
+            for (j = 0; j < SINES_PER_NOTE; j++) { // add each freq component
                 _Accum idx = note->idx[j];
                 out_i += sine_tables[j][(unsigned int) idx % SINE_TABLE_SIZE];
                 note->idx[j] = idx + note->inc[j];
             }
-            if (note->state == 2) {
+            if (note->state == 2) { // released
                 out_i *= rel_table[min(note->rel_idx++ >> 8, REL_TABLE_SIZE - 1)];
                 if (note->rel_idx >> 8 == REL_TABLE_SIZE)
                     note->state = 0;
             }
+            //multiply by envelope function and add to total ouput
             out += out_i * env_table[sound][min(note->env_idx++ >> 8, ENV_TABLE_SIZE - 1)];
         }
     }
 
     playback_time++;
+    // check for commands issued at this time
     while (playback_time == recorded_times[playback_idx]) {
         char n = recorded_notes[playback_idx++];
-        if (n & BIT_5) {
+        if (n & BIT_5) { // change octave
             for (i = 0; i < NUM_NOTES; i++)
                 notes[i].state = 0;
-            if (n & BIT_0) {
+            if (n & BIT_0) { // up
                 for (i = 0; i < NUM_NOTES; i++)
                     for (j = 0; j < SINES_PER_NOTE; j++)
                         notes[i].inc[j] <<= 1;
                 octave++;
-            } else {
+            } else { // down
                 for (i = 0; i < NUM_NOTES; i++)
                     for (j = 0; j < SINES_PER_NOTE; j++)
                         notes[i].inc[j] >>= 1;
                 octave--;
             }
-        } else if (n & BIT_6) {
+        } else if (n & BIT_6) { // change sound
             setSound(n & (BIT_1 | BIT_0));
-        } else {
+        } else { // toggle a note
             note_on[n] = !note_on[n];
         }
     }
-    if (playback_time == recorded_length) {
+    if (playback_time == recorded_length) { // end of recording
         if (loop) {
             initialize_playback();
         } else {
@@ -129,12 +143,14 @@ void __ISR(_TIMER_2_VECTOR, IPL2AUTO) Timer2Handler(void) {
 
     while (TxBufFullSPI1());
     mPORTBClearBits(BIT_1);
+    // DC bias output to prevent clipping
     WriteSPI1(DAC_CONFIG_CHAN_A | (((int) out + 0x800) & 0x0fff));
     while (SPI1STATbits.SPIBUSY);
     ReadSPI1();
     mPORTBSetBits(BIT_1);
 }
 
+// responds to button presses
 static PT_THREAD (btn_thread(struct pt *pt)) {
     PT_BEGIN(pt);
     static char_int btn_st, btn_samp;
@@ -145,7 +161,7 @@ static PT_THREAD (btn_thread(struct pt *pt)) {
         btn_samp.i = mPORTBReadBits(BIT_0 | BIT_2);
         char_int btn_st_prev = btn_st;
         btn_st.i = (btn_samp.i ^ btn_samp_prev.i) & btn_st.i | btn_samp.i & btn_samp_prev.i;
-        if (PRESSED(BIT_0)) {
+        if (PRESSED(BIT_0)) { // start/stop playback
             if (playback) {
                 playback = 0;
                 loop = 0;
@@ -155,13 +171,13 @@ static PT_THREAD (btn_thread(struct pt *pt)) {
                 initialize_playback();
             }
         }
-        if (PRESSED(BIT_2)) {
+        if (PRESSED(BIT_2)) { // start/stop looping playback
             loop = !loop;
             if (loop && !playback) {
                 initialize_playback();
             }
         }
-        for (i = 0; i < NUM_NOTES; i++) {
+        for (i = 0; i < NUM_NOTES; i++) { // set note states
             if (notes[i].state == 1) {
                 if (!note_on[i])
                     notes[i].state = 2;
@@ -175,6 +191,7 @@ static PT_THREAD (btn_thread(struct pt *pt)) {
     PT_END(pt);
 }
 
+// recieve UART transmissions
 static PT_THREAD (uart_thread(struct pt *pt)) {
     PT_BEGIN(pt);
     for (;;) {
@@ -197,7 +214,7 @@ static PT_THREAD (uart_thread(struct pt *pt)) {
             }
             recorded_times[recorded_count] = 0;
             mPORTAClearBits(BIT_0);
-        } else {
+        } else { // not for me, ignore
             for (i = 0; i < 5 * count + 6; i++)
                 RECV_BYTE(j);
         }
@@ -223,9 +240,11 @@ int main() {
     configureUART();
     configureDAC();
 
+    // playback and loop buttons
     mPORTBSetPinsDigitalIn(BIT_0 | BIT_2);
     EnablePullDownB(BIT_0 | BIT_2);
 
+    // is playing LED indicator
     mPORTBSetPinsDigitalOut(BIT_15);
     mPORTBClearBits(BIT_15);
 

@@ -19,22 +19,36 @@
 #define ENV_TABLE_SIZE 512
 #define REL_TABLE_SIZE 32
 
+// useful for sending ints over UART
 typedef union { int i; char c[4]; } char_int;
 
 struct Note {
+    // 0: button not pressed
+    // 1: button pressed
+    // 2: button just released
     volatile char state;
+
+    // inc ~ frequency, idx: current location in sine table
     _Accum inc[SINES_PER_NOTE], idx[SINES_PER_NOTE];
+
+    // curent indices in envelope tables
     int env_idx, rel_idx;
 };
 
+// frequencies of every note relative to the lowest
+// base_freqs[i] = 2^(i/12)
 const _Accum base_freqs[] = {1, 1.0595, 1.1225, 1.1892, 1.2599, 1.3348,
         1.4142, 1.4983, 1.5874, 1.6818, 1.7818, 1.8877, 2,
         2.1189, 2.2449, 2.3784, 2.5198, 2.6697};
+
+// harmonic frequencies for each sound type
 const _Accum freq_ratios[3][SINES_PER_NOTE] = {
     {1, 2, 3, 4}, // piano
     {1, 1.5, 3, 6}, // organ
     {1, 2, 3, 4} // guitar
 };
+
+// relative amplitudes of each harmonic
 const _Accum ampl_ratios[3][SINES_PER_NOTE] = {
     {1, 3.433, 1.836, 0.7996}, // piano
     {1, 0.6608, 0.7184, 1.103}, //organ
